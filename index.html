@@ -29,6 +29,7 @@
       button{ font-family:inherit; cursor:pointer; }
       .wrap{ max-width:620px; margin:0 auto; padding:0 12px 40px; }
       .hidden{ display:none !important; }
+      button:focus-visible{ outline:3px solid var(--lamp); outline-offset:2px; }
 
       /* ---------- scene header ---------- */
       .scene{ position:relative; overflow:hidden; background:#101827; border-bottom:3px solid var(--wood-dark);
@@ -610,9 +611,18 @@
         .stage .etalase{ min-height:118px; }
       }
       @media (orientation:landscape) and (max-height:430px){
+        .stage .cust .avatar svg{ height:44px; }
+        .stage .cust-zone{ padding-top:2px; }
+        .stage .cust-zone::after{ height:5px; margin:1px -6px 0; }
+        .stage .plate-front .plate{ width:44px; height:44px; }
+        .plate-front{ padding:3px 8px 4px; margin-top:1px; }
+        .cart-zone{ min-height:0; overflow:hidden; }
+        .etalase-case{ min-height:0; }
+        .stage .etalase{ min-height:0; }
+        .stage .servebar{ padding:4px 8px calc(4px + env(safe-area-inset-bottom)); }
+        .stage .serve-row #btn-clear-plate, .stage .serve-row #btn-serve{ min-height:44px; }
+        .stage #serve-hint{ margin:2px 0 0; font-size:10px; line-height:1.1; }
         .stage .tabs button{ min-height:30px; }
-        .etalase-case{ min-height:182px; }
-        .stage .etalase{ min-height:106px; }
       }
 
       /* ===== PIRING DI DEPAN PELANGGAN (tanpa kompor, tanpa meja kerja di bawah) =====
@@ -714,9 +724,10 @@
         .hud-strip .pill{ min-height:20px; font-size:10px; }
       }
       @media (max-width:380px){
-        .hud-strip .hud{ gap:3px; }
+        .hud-strip .hud{ gap:3px; flex-wrap:wrap; }
         .hud-strip .pill{ font-size:10px; padding:2px 5px; }
         .hud-strip .repbar{ width:16px; }
+        #btn-end{ white-space:nowrap; min-width:max-content; min-height:22px; }
       }
 
       /* ===== IKON + NAMA MAKANAN DIKECILKAN LAGI =====
@@ -1004,7 +1015,7 @@ const byId = {}; MENU.forEach(m => byId[m.id] = m);
 const costOf = m => Math.round(m.price * 0.4 / 100) * 100;
 const maxStockOf = m => m.price <= 1000 ? 14 : (m.price >= 7000 ? 8 : 10);
 const TARGET = 750000, SEWA = 12000;
-const DENOMS = [1000, 2000, 5000, 10000, 20000, 50000];
+const DENOMS = [100, 500, 1000, 2000, 5000, 10000, 20000, 50000];
 const CTYPES = [
   {type:"Mahasiswa", avatar:"🧑‍🎓"}, {type:"Mahasiswa", avatar:"👩‍🎓"},
   {type:"Mas Ojol", avatar:"🛵"}, {type:"Bapak Nongkrong", avatar:"🧔"},
@@ -1014,13 +1025,21 @@ const CTYPES = [
 
 /* ==================== SAVE (localStorage) ==================== */
 const SAVE_KEY = "angkringan-tazty-save-v1";
-function defaultSave(){ return { night:1, money:150000, rep:100, stars:0, totalProfit:0, freeMode:false, won:false, sound:true, stock:{}, seenUnlocks:[] }; }
+function defaultSave(){ return { night:1, money:150000, rep:100, stars:0, totalProfit:0, freeMode:false, won:false, sound:true, stock:{}, seenUnlocks:[], prepBelanja:0, pendingTalangan:0, activeNight:null }; }
 let SAVE;
 try { SAVE = JSON.parse(localStorage.getItem(SAVE_KEY)) || defaultSave(); }
 catch(e){ SAVE = defaultSave(); }
 if (typeof SAVE.money !== "number") SAVE = defaultSave();
 if (!Array.isArray(SAVE.seenUnlocks)) SAVE.seenUnlocks = [];
-function persist(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); } catch(e){} }
+if (typeof SAVE.prepBelanja !== "number") SAVE.prepBelanja = 0;
+if (typeof SAVE.pendingTalangan !== "number") SAVE.pendingTalangan = 0;
+if (!SAVE.stock || typeof SAVE.stock !== "object") SAVE.stock = {};
+function persist(){
+  SAVE.prepBelanja = prepBelanja;
+  SAVE.pendingTalangan = pendingTalangan;
+  SAVE.activeNight = NIGHT && !NIGHT.finished ? NIGHT : null;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); } catch(e){}
+}
 
 /* ==================== UTIL & SOUND ==================== */
 const $ = id => document.getElementById(id);
@@ -1111,9 +1130,8 @@ $("btn-continue").onclick = () => { sfx("click"); openPrep(); };
 $("btn-mute").onclick = () => { SAVE.sound = !SAVE.sound; persist(); $("btn-mute").textContent = SAVE.sound ? "🔊" : "🔇"; if (SAVE.sound) sfx("click"); };
 
 /* ==================== PREP ==================== */
-let prepBelanja = 0;
+let prepBelanja = SAVE.prepBelanja;
 function openPrep(){
-  prepBelanja = 0;
   const n = SAVE.night;
   $("prep-title").textContent = "🛒 Persiapan Malam " + n + (SAVE.freeMode ? " (Mode Bebas)" : "");
   const cust = custCount(n);
@@ -1172,7 +1190,8 @@ $("btn-prep-back").onclick = () => { sfx("click"); renderHome(); show("scr-home"
 $("btn-start").onclick = () => { sfx("pop"); startNight(); };
 
 /* ==================== NIGHT / GAME ==================== */
-let NIGHT = null, pendingTalangan = 0, custSeq = 0, tickTimer = null, etalaseTab = "makanan";
+let NIGHT = SAVE.activeNight && SAVE.activeNight.night === SAVE.night && !SAVE.activeNight.finished ? SAVE.activeNight : null;
+let pendingTalangan = SAVE.pendingTalangan, custSeq = 0, tickTimer = null, etalaseTab = "makanan";
 function custCount(n){ return Math.min(10 + n, 18); }
 function makeMissions(n, total){
   const serveT = Math.ceil(total * 0.6);
@@ -1200,6 +1219,7 @@ function startNight(){
   };
   pendingTalangan = 0; prepBelanja = 0;
   for (let i = 0; i < Math.min(3, total); i++) spawnCustomer();
+  persist();
   renderAllGame(); show("scr-game");
   if (tickTimer) clearInterval(tickTimer);
   tickTimer = setInterval(tick, 200);
@@ -1367,10 +1387,14 @@ function renderQueue(){
   const row = $("queue-row"); row.innerHTML = "";
   for (let i = 0; i < 3; i++){
     const c = NIGHT.customers[i];
-    const div = document.createElement("div");
+    const div = document.createElement(c ? "button" : "div");
     if (!c){ div.className = "cust empty"; div.textContent = NIGHT.spawned >= NIGHT.totalCust ? "—" : "menunggu…"; row.appendChild(div); continue; }
+    div.type = "button";
     const isNew = !seenCust.has(c.id); seenCust.add(c.id);
     div.className = "cust" + (c.id === NIGHT.activeId ? " active" : "") + (isNew ? " enter" : "");
+    div.setAttribute("aria-pressed", String(c.id === NIGHT.activeId));
+    div.setAttribute("aria-label", c.type + ". Pesanan: " + c.order.map(o => byId[o.id].name + (o.done ? " selesai" : "")).join(", ") + ". " + (c.id === NIGHT.activeId ? "Pelanggan aktif." : "Pilih pelanggan ini."));
+    div.disabled = !!NIGHT.pay;
     const payLabel = c.pay === "tunai" ? "💵 Tunai" : (c.pay === "qris" ? "📱 QRIS" : "🛵 Online");
     const payCls = c.pay === "tunai" ? "pay-tunai" : (c.pay === "qris" ? "pay-qris" : "pay-online");
     const chips = c.order.map(o => {
@@ -1651,6 +1675,7 @@ function removeCustomer(id, leftAngry){
 function tick(){
   if (!NIGHT || NIGHT.finished) return;
   const dt = 200;
+  NIGHT.saveElapsed = (NIGHT.saveElapsed || 0) + dt;
   if (NIGHT.spawnWait > 0){
     NIGHT.spawnWait -= dt;
     if (NIGHT.spawnWait <= 0 && NIGHT.customers.length < 3) { spawnCustomer(); }
@@ -1665,6 +1690,7 @@ function tick(){
   });
   renderQueue(); renderHUD();
   if (changed){ renderTray(); renderEtalase(); renderServeBtn(); renderMissions(); }
+  if (NIGHT.saveElapsed >= 1000){ NIGHT.saveElapsed = 0; persist(); }
   checkNightEnd();
 }
 function checkNightEnd(){
@@ -1839,8 +1865,20 @@ document.addEventListener("click", e => {
 }, true);
 
 /* ==================== INIT ==================== */
-renderHome();
-show("scr-home");
+if (NIGHT){
+  NIGHT.pay = null;
+  NIGHT.unlockPopupOpen = false;
+  custSeq = NIGHT.customers.reduce((max, c) => Math.max(max, Number(c.id) || 0), 0);
+  closeSheet();
+  renderAllGame();
+  show("scr-game");
+  tickTimer = setInterval(tick, 200);
+  toast("Malam " + NIGHT.night + " dilanjutkan dari progres tersimpan.");
+  checkNightEnd();
+} else {
+  renderHome();
+  show("scr-home");
+}
 </script>
   </body>
 </html>
